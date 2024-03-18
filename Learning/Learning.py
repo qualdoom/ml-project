@@ -2,6 +2,7 @@ from torchrl.envs import *
 from torchrl.envs.libs.gym import *
 from tensordict import TensorDict
 import numpy as np
+import matplotlib.pyplot as plt
 
 from Constants.constants import *
 from Environment.Environment import get_environment
@@ -19,7 +20,7 @@ class Learning:
         total_reward = 0
         
         state = env.reset()
-        
+
         for t in range(t_max):
             action = agent.select_action(state['pixels_trsf'], epsilon=epsilon)
 
@@ -32,6 +33,17 @@ class Learning:
             next_state.pop('truncated', None)
             next_state.pop('terminated', None)
             state['next'] = next_state
+
+            # print("current")
+            # for i in range(FRAME_SKIP):
+            #     plt.imshow(state['pixels_trsf'][i].cpu().permute(0, 1), cmap="gray")
+            #     plt.show()
+
+
+            # print("next")
+            # for i in range(FRAME_SKIP):
+            #     plt.imshow(state['pixels_trsf'][i].cpu().permute(0, 1), cmap="gray")
+            #     plt.show()
 
             _action = torch.tensor(action)
             # _action[action] = 1

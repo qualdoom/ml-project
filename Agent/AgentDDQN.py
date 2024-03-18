@@ -5,10 +5,12 @@ from torchrl.envs.libs.gym import *
 from IPython.display import clear_output
 from torchrl.data import *
 import matplotlib.pyplot as plt
-from torchrl.data import ReplayBuffer, ListStorage, LazyTensorStorage
+from torchrl.data import ReplayBuffer, ListStorage, LazyTensorStorage, LazyMemmapStorage
 import logging  
+import math
 from NetworkArchitecture.NeuralNetwork import NeuralNetwork
 from Constants.constants import *
+import torch.nn as nn
 
 
 # want to save best model and current model.
@@ -37,8 +39,11 @@ class Agent:
         self.target_network = self.create_network().to(self.device)
         self.sync_networks()
 
+    def f(self):
+        return (((NUM_FRAMES - self.cnt_frames) / NUM_FRAMES) ** 3) * 0.9 + 0.1
+
     def get_epsilon(self):
-        return max(0.1, (((1 - (self.cnt_frames / NUM_FRAMES)) ** 2) * 0.9 + 0.1))
+        return max(0.1, self.f())
 
     def create_network(self):
         return NeuralNetwork(num_channels=self.num_channels, height=self.height, width=self.width,
@@ -51,7 +56,7 @@ class Agent:
         self.optimizer = torch.optim.Adam(self.policy_network.parameters(), lr=LEARNING_RATE)
 
     def setup_replay_buffer(self):
-        self.replay_buffer = ReplayBuffer(storage=LazyTensorStorage(SIZE))
+        self.replay_buffer = ReplayBuffer(storage=LazyMemmapStorage(SIZE))
 
     def setup_agent_properties(self):
         self.frames = []
@@ -69,8 +74,19 @@ class Agent:
             epsilon = self.get_epsilon()
         if np.random.rand() < epsilon:
             return np.random.choice(np.arange(self.n_actions))
-        value, index = torch.max(self.policy_network(state).detach(), 1)
+        predicted = self.policy_network(state).detach()
+        value, index = torch.max(predicted, 1)
+        print(value, index)
         return index.item()
+        # s = nn.Softmax(dim=0)
+        # probs = s(predicted)
+        # # print(predicted)
+        # print(probs)
+        # action = np.random.choice(np.arange(self.n_actions), p=np.asarray(probs))
+        # print("ACTION", action)
+        # return action
+        # # print(value, index.item())
+        # # return index.item()
 
     def calculate_td_error(self, state, action, reward, next_state, done, gamma=GAMMA):
         with torch.no_grad():
@@ -83,11 +99,16 @@ class Agent:
     def compute_loss(self, states, actions, rewards, next_states, dones, gamma=GAMMA):
         states, actions, rewards, next_states, dones = self.convert_to_tensors(states, actions, rewards, next_states, dones)
         current_q_values = self.policy_network(states).gather(1, actions).squeeze(-1)
-        next_q_values = self.target_network(next_states).max(1)[0]
-        expected_q_values = rewards + gamma * next_q_values * (1 - dones)
-        loss = torch.mean((current_q_values - expected_q_values.detach()) ** 2)
-        print("loss is", loss.item())
-        return loss
+        next_q_values = self.policy_network(next_states).max(1).values
+        expected_q_values = rewards + gamma * (next_q_values * (1 - dones))
+
+        criterion = nn.SmoothL1Loss()
+        loss = criterion(current_q_values, expected_q_values.detach())
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        # print("loss is", loss.item())
+        return loss.item()
     
     def convert_to_tensors(self, states, actions, rewards, next_states, dones):
         states = torch.tensor(states, dtype=torch.float32).to(self.device)
@@ -107,23 +128,18 @@ class Agent:
         self.replay_buffer.add(state)
 
     def train(self, batch_size=1000):
-        self.optimizer.zero_grad()
         batch = self.replay_buffer.sample(batch_size)
-        loss = self.compute_loss(batch['state'], batch['action'], batch['reward'], batch['next_state'], batch['done'])
-        print("loss is", loss.item())
-        self.perform_backpropagation(loss)
-        return loss.item()
+        # print(batch)
+        # print(batch['state'])
+        # print(batch['action'])
+        # print(batch['done'])
 
-    def perform_backpropagation(self, loss):
-        print("loss is", loss.item())
-        print(loss)
-        loss.backward()
-        print("loss is", loss.item())
-        print(loss)
-        print(loss.grad_fn)
-        self.optimizer.step()
-        print("loss is", loss.item())
-        print(loss)
+        # for i in batch['state']:
+        #     plt.imshow(i.permute(1, 2, 0), cmap="gray")
+        #     plt.show()
+        # print(batch['state'], batch['action'], batch['done'])
+        loss = self.compute_loss(batch['state'], batch['action'], batch['reward'], batch['next_state'], batch['done'])
+        return loss
 
     def load(self, filepath='model.pth'):
         checkpoint = torch.load(filepath, map_location=self.device)

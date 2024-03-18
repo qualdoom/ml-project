@@ -9,13 +9,11 @@ from Constants.constants import *
 
 def get_environment(name, frame_skip=FRAME_SKIP, width=W, height=H):
     return TransformedEnv(
-        GymEnv(name, from_pixels=True),
+        GymEnv(name, from_pixels=True, frame_skip=4),
         Compose(
             ToTensorImage(in_keys=["pixels"], out_keys=["pixels_trsf"]),
             Resize(in_keys=["pixels_trsf"], w=width, h=height),
-            GrayScale(in_keys=["pixels_trsf"]),
-            CatFrames(dim=-3, N=frame_skip, in_keys=["pixels_trsf"]),
-            FrameSkipTransform(frame_skip)
+            GrayScale(in_keys=["pixels_trsf"])
         )
     ).to(get_device())
 
